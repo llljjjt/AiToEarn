@@ -13,6 +13,10 @@ import {
   GoogleLoginDto,
   MailLoginDto,
   MailLoginSchema,
+  MailPasswordLoginDto,
+  MailPasswordLoginSchema,
+  MailRegisterDto,
+  MailRegisterSchema,
   MailRepasswordDto,
   MailRepasswordVerifyDto,
   MailRepasswordVerifySchema,
@@ -36,6 +40,94 @@ export class LoginController {
     private readonly redisService: RedisService,
     private readonly loginService: LoginService,
   ) { }
+
+  // ---------- 邮箱密码登录 ----------
+  @ApiDoc({
+    summary: '邮箱密码登录',
+    description: '通过邮箱和密码登录。',
+    body: MailPasswordLoginSchema,
+  })
+  @Public()
+  @RateLimit({ ttl: 60, limit: 5, keyGenerator: req => `mailPasswordLogin:${req.body.mail}` })
+  @Post('mail/password')
+  async loginByMailPassword(@Body() body: MailPasswordLoginDto) {
+    const { mail, password } = body
+
+    const userInfo = await this.userService.getUserInfoByMail(mail, true)
+    if (!userInfo || userInfo.isDelete)
+      throw new AppException(ResponseCode.UserNotFound, 'The account does not exist')
+
+    if (!userInfo.password || !userInfo.salt)
+      throw new AppException(ResponseCode.ValidationFailed, 'Please set a password first')
+
+    const { validatePassWord } = await import('../../common/utils/password.util')
+    const isOk = validatePassWord(userInfo.password, userInfo.salt, password)
+    if (!isOk)
+      throw new AppException(ResponseCode.ValidationFailed, 'Incorrect password')
+
+    if (userInfo.status === UserStatus.STOP)
+      throw new AppException(ResponseCode.UserStatusError)
+
+    const token = this.authService.generateToken(userInfo)
+    const tokenInfo = this.authService.decodeToken(token)
+
+    this.userService.afterLogin(userInfo)
+
+    return {
+      type: 'login',
+      token,
+      exp: tokenInfo.exp,
+      userInfo,
+    }
+  }
+
+  // ---------- 邮箱密码注册 ----------
+  @ApiDoc({
+    summary: '邮箱密码注册',
+    description: '通过邮箱和密码注册新账号。',
+    body: MailRegisterSchema,
+  })
+  @Public()
+  @RateLimit({ ttl: 60, limit: 3, keyGenerator: req => `mailRegister:${req.body.mail}` })
+  @Post('mail/register')
+  async registerByMail(@Body() body: MailRegisterDto) {
+    const { mail, password, inviteCode } = body
+
+    const existUser = await this.userService.getUserInfoByMail(mail)
+    if (existUser && !existUser.isDelete)
+      throw new AppException(ResponseCode.ValidationFailed, 'The email has already been registered')
+
+    if (inviteCode) {
+      const inviteUserInfo = await this.userService.getUserByPopularizeCode(inviteCode)
+      if (!inviteUserInfo)
+        throw new AppException(ResponseCode.UserLoginCodeError, 'Invalid invite code')
+    }
+
+    const { encryptPassword } = await import('../../common/utils/password.util')
+    const { password: encryptedPassword, salt } = encryptPassword(password)
+
+    const userInfo = await this.userService.createUserByMailWithPassword(
+      mail,
+      encryptedPassword,
+      salt,
+      inviteCode,
+    )
+
+    if (userInfo.status === UserStatus.STOP)
+      throw new AppException(ResponseCode.UserStatusError)
+
+    const token = this.authService.generateToken(userInfo)
+    const tokenInfo = this.authService.decodeToken(token)
+
+    this.userService.afterLogin(userInfo)
+
+    return {
+      type: 'regist',
+      token,
+      exp: tokenInfo.exp,
+      userInfo,
+    }
+  }
 
   @ApiDoc({
     summary: '发送邮箱登录验证码',
