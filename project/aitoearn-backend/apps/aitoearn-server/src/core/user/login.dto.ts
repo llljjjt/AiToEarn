@@ -57,3 +57,20 @@ const PhoneVerifySchema = z.object({
   code: z.string().length(6, { message: '验证码为6位数字' }).describe('短信验证码'),
 })
 export class PhoneVerifyDto extends createZodDto(PhoneVerifySchema) {}
+
+// ---------- 邮箱密码登录 / 注册 ----------
+
+export const MailPasswordLoginSchema = z.object({
+  mail: z.string().email().describe('邮箱'),
+  password: z.string().min(6, { message: '密码至少6位' }).describe('密码'),
+})
+
+export class MailPasswordLoginDto extends createZodDto(MailPasswordLoginSchema, 'MailPasswordLoginDto') {}
+
+export const MailRegisterSchema = z.object({
+  mail: z.string().email().describe('邮箱'),
+  password: z.string().min(6, { message: '密码至少6位' }).describe('密码'),
+  inviteCode: z.string().describe('邀请码').optional(),
+})
+
+export class MailRegisterDto extends createZodDto(MailRegisterSchema, 'MailRegisterDto') {}
